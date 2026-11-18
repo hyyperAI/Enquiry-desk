@@ -1,0 +1,186 @@
+{
+  "name": "Jetwing - Outbox sender (email replies)",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000001",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from public.jw_app_claim_reply_outbox(10);",
+        "options": {}
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000002",
+      "name": "Claim queued replies",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [220, 0],
+      "notes": "Pick your jetwing Postgres credential (must connect as postgres / service role)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1000000-0000-4000-8000-000000000001",
+              "leftValue": "={{ $json.outbox_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000003",
+      "name": "Anything to send?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1000000-0000-4000-8000-000000000002",
+              "leftValue": "={{ $json.reply_to_message_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000004",
+      "name": "Has a mail to reply to?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [660, -100]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $json.reply_to_message_id }}",
+        "emailType": "text",
+        "message": "={{ $json.body }}",
+        "options": { "appendAttribution": false, "replyToSenderOnly": true }
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000005",
+      "name": "Reply in Gmail thread",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [900, -200],
+      "onError": "continueErrorOutput",
+      "notes": "Pick the Jetwing Gmail credential. Replies inside the customer's existing thread."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select public.jw_app_finish_reply_outbox($1::uuid, $2, $3) as email_message_id;",
+        "options": {
+          "queryReplacement": "={{ $('Has a mail to reply to?').item.json.outbox_id }},{{ $json.id }},{{ $json.threadId }}"
+        }
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000006",
+      "name": "Record as sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1140, -300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1000000-0000-4000-8000-000000000003",
+              "leftValue": "={{ $('Has a mail to reply to?').item.json.gmail_draft_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000007",
+      "name": "AI draft left in Gmail?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1360, -300]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "delete",
+        "messageId": "={{ $('Has a mail to reply to?').item.json.gmail_draft_id }}"
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000008",
+      "name": "Delete the old AI draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [1580, -380],
+      "onError": "continueRegularOutput",
+      "notes": "So nobody sends the same reply twice from Gmail. Safe to fail."
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select public.jw_app_fail_outbox($1::uuid, $2);",
+        "options": {
+          "queryReplacement": "={{ $('Has a mail to reply to?').item.json.outbox_id }},{{ String($json.error?.message || $json.error || $json.message || 'Gmail could not send this reply').replace(/,/g, ';') }}"
+        }
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000009",
+      "name": "Mark failed (Gmail error)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1140, -100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select public.jw_app_fail_outbox($1::uuid, $2);",
+        "options": {
+          "queryReplacement": "={{ $json.outbox_id }},No Gmail message found for this enquiry to reply to"
+        }
+      },
+      "id": "0b1f5c1e-5d0a-4a57-9a51-000000000010",
+      "name": "Mark failed (nothing to reply to)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 40]
+    }
+  ],
+  "connections": {
+    "Every minute": { "main": [[{ "node": "Claim queued replies", "type": "main", "index": 0 }]] },
+    "Claim queued replies": { "main": [[{ "node": "Anything to send?", "type": "main", "index": 0 }]] },
+    "Anything to send?": { "main": [[{ "node": "Has a mail to reply to?", "type": "main", "index": 0 }], []] },
+    "Has a mail to reply to?": {
+      "main": [
+        [{ "node": "Reply in Gmail thread", "type": "main", "index": 0 }],
+        [{ "node": "Mark failed (nothing to reply to)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Reply in Gmail thread": {
+      "main": [
+        [{ "node": "Record as sent", "type": "main", "index": 0 }],
+        [{ "node": "Mark failed (Gmail error)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Record as sent": { "main": [[{ "node": "AI draft left in Gmail?", "type": "main", "index": 0 }]] },
+    "AI draft left in Gmail?": { "main": [[{ "node": "Delete the old AI draft", "type": "main", "index": 0 }], []] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false
+}
