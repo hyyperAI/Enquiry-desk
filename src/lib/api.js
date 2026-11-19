@@ -4,8 +4,8 @@
 // How sending works: the app never sends mail or messages itself.
 // It writes a row to `outbox` (status 'queued'); an n8n workflow picks it up,
 // sends through Gmail / WhatsApp / Facebook, and marks it 'sent' or 'failed'.
-// Follow-ups use the existing followups table: "send now" sets due_at to now,
-// and the existing n8n follow-up workflow sends it.
+// Follow-ups: the app writes plain text to followups.message_body and sets due_at
+// ("send now" = now) or ai_draft_requested_at ("write it now"). n8n 08 does the rest.
 
 import { supabase } from './supabase.js';
 
@@ -436,10 +436,10 @@ export async function createManualEnquiry(email, name, subject) {
 }
 
 export async function getEnquiryHeader(id) {
-  const e = ok(await supabase.from('enquiries').select('id,subject,status,closed_reason,contacts(full_name,email)').eq('id', id).single());
+  const e = ok(await supabase.from('enquiries').select('id,subject,status,closed_reason,followup_paused,contacts(full_name,email)').eq('id', id).single());
   return {
     id: e.id, name: e.contacts?.full_name || e.contacts?.email || 'Unknown', email: e.contacts?.email || '', subject: e.subject || '',
-    rawStatus: e.status, status: statusLabel(e),
+    rawStatus: e.status, status: statusLabel(e), followupPaused: !!e.followup_paused,
   };
 }
 
@@ -474,71 +474,129 @@ export async function updateTravelDetails(enquiryId, patch) {
 
 // ---------- follow-ups ----------
 
-export const FOLLOWUP_TABS = ['Due now', 'Scheduled', 'Sent'];
+export const FOLLOWUP_FILTERS = ['All', 'Due today', 'Waiting', 'Failed', 'Sent', 'Cancelled'];
+export const FOLLOWUP_STEPS = 3;
+export const STEP_TEMPLATE = { 1: 'followup_1', 2: 'followup_2', 3: 'followup_final' };
+const STUCK_MS = 30 * 60000;
+// Old rows may hold AI HTML. Staff always see and edit plain text; n8n makes the HTML when it sends.
+const plainBody = (b) => (b && /<\/?[a-z][^>]*>/i.test(b) ? htmlToText(b) : b || '');
+const ORDER = { Failed: 0, 'Due today': 1, Sending: 2, Waiting: 3, Sent: 4, Cancelled: 5 };
 
-/** enquiryId (optional) limits the list to one customer's enquiry. */
-export async function listFollowUps(tab, enquiryId) {
+/** Staff-facing status of one follow-up row. */
+function followUpStatus(f, endToday) {
+  if (f.status === 'sent') return 'Sent';
+  if (f.status === 'cancelled') return 'Cancelled';
+  if (f.status === 'failed') return 'Failed';
+  if (f.status === 'processing') return Date.now() - new Date(f.updated_at).getTime() > STUCK_MS ? 'Failed' : 'Sending';
+  return new Date(f.due_at) <= endToday ? 'Due today' : 'Waiting';
+}
+
+/**
+ * All follow-ups, newest work first. filter: one of FOLLOWUP_FILTERS ('All' hides cancelled).
+ * enquiryId (optional) limits the list to one customer's enquiry.
+ */
+export async function listFollowUps(filter = 'All', enquiryId) {
   const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
-  let q = supabase.from('followups').select('id,enquiry_id,due_at,status,message_body,sent_at,last_error,enquiries(subject,contacts(full_name,email))');
+  let q = supabase.from('followups')
+    .select('id,enquiry_id,due_at,status,step,subject,message_body,ai_draft_requested_at,sent_at,last_error,updated_at,enquiries(subject,followup_paused,contacts(full_name,email))')
+    .order('due_at', { ascending: false }).limit(300);
   if (enquiryId) q = q.eq('enquiry_id', enquiryId);
-  if (tab === 'Due now') q = q.in('status', ['scheduled', 'due']).lte('due_at', endToday.toISOString()).order('due_at');
-  else if (tab === 'Scheduled') q = q.eq('status', 'scheduled').gt('due_at', endToday.toISOString()).order('due_at');
-  else q = q.eq('status', 'sent').order('sent_at', { ascending: false }).limit(50);
-  return ok(await q).map((f) => ({
-    id: f.id, enquiryId: f.enquiry_id, status: f.status,
-    name: f.enquiries?.contacts?.full_name || f.enquiries?.contacts?.email || 'Unknown',
-    quote: f.enquiries?.subject || '', due: when(f.status === 'sent' ? f.sent_at : f.due_at), dueAt: f.due_at,
-    subject: `Re: ${f.enquiries?.subject || 'your quote'}`,
-    body: f.message_body || '',
-    lastError: f.last_error,
-  }));
+  return ok(await q).map((f) => {
+    const status = followUpStatus(f, endToday);
+    const enquirySubject = f.enquiries?.subject || 'your enquiry';
+    const defaultSubject = /^re:/i.test(enquirySubject) ? enquirySubject : `Re: ${enquirySubject}`;
+    return {
+      id: f.id, enquiryId: f.enquiry_id, status, raw: f.status, step: f.step || 1,
+      name: f.enquiries?.contacts?.full_name || f.enquiries?.contacts?.email || 'Unknown',
+      subject: f.subject || defaultSubject, defaultSubject,
+      due: when(f.status === 'sent' ? f.sent_at : f.due_at), dueAt: f.due_at,
+      body: plainBody(f.message_body),
+      // Stored as HTML by the old workflow: shown as text, but must be saved to store it as text.
+      oldFormat: !!f.message_body && /<\/?[a-z][^>]*>/i.test(f.message_body),
+      aiRequested: !!f.ai_draft_requested_at,
+      lastError: f.last_error,
+      paused: !!f.enquiries?.followup_paused,
+      // Staff can only change rows that are still waiting or failed (RLS); 'processing' belongs to n8n.
+      editable: ['scheduled', 'due', 'failed'].includes(f.status),
+    };
+  })
+    .filter((f) => (filter === 'All' ? f.status !== 'Cancelled' : filter === 'Failed' ? f.status === 'Failed' : f.status === filter))
+    .sort((a, b) => ORDER[a.status] - ORDER[b.status] || (a.status === 'Sent' ? new Date(b.dueAt) - new Date(a.dueAt) : new Date(a.dueAt) - new Date(b.dueAt)));
 }
 
-export async function followUpCounts(enquiryId) {
-  const res = await Promise.all(FOLLOWUP_TABS.map((t) => listFollowUps(t, enquiryId)));
-  return Object.fromEntries(FOLLOWUP_TABS.map((t, i) => [t, res[i].length]));
-}
+/** Failed + stuck follow-ups, for the sidebar badge. */
+export const failedFollowUpCount = async () => (await listFollowUps('Failed')).length;
 
-/** Empty body means the AI writes it when it goes out. */
-export const sendFollowUpNow = async (id, body) =>
-  ok(await supabase.from('followups').update({ due_at: new Date().toISOString(), message_body: body || null, status: 'scheduled', last_error: null }).eq('id', id).in('status', ['scheduled', 'due', 'failed']).select());
-export const moveFollowUp = async (id, dueAt) =>
-  ok(await supabase.from('followups').update({ due_at: new Date(dueAt).toISOString(), status: 'scheduled', last_error: null }).eq('id', id).in('status', ['scheduled', 'due', 'failed']));
-/** Staff can schedule a follow-up for any enquiry; no quote needed. n8n sends it when due. */
-export async function scheduleFollowUp(enquiryId, dueAt, body) {
-  const { data, error } = await supabase.from('followups').insert({
-    enquiry_id: enquiryId, due_at: new Date(dueAt).toISOString(), message_body: body?.trim() || null, status: 'scheduled', source: 'staff',
-  }).select().single();
-  if (error?.code === '23505') throw new Error('This customer already has a follow-up. Move or send that one instead.');
-  if (error) throw error;
-  return data;
-}
+const textOrNull = (t) => (t?.trim() ? t.trim() : null);
+const OPEN = ['scheduled', 'due', 'failed'];
+// The subject is stored only when staff changed it; otherwise n8n uses "Re: <enquiry subject>".
+const content = (f, { subject, body }) => ({ message_body: textOrNull(body), subject: subject?.trim() && subject.trim() !== f.defaultSubject ? subject.trim() : null });
 
-/** Numbers for the Follow-ups insights row. enquiryId (optional) limits to one customer. */
-export async function followUpInsights(enquiryId) {
+/** Save subject and text. A failed follow-up goes back to waiting at its due time. */
+export const saveFollowUp = async (f, edits) =>
+  ok(await supabase.from('followups').update({ ...content(f, edits), ...(f.raw === 'failed' ? { status: 'scheduled', last_error: null } : {}) }).eq('id', f.id).in('status', OPEN));
+/** Save and send within about 2 minutes. Empty text means the AI writes it. */
+export const sendFollowUpNow = async (f, edits) =>
+  ok(await supabase.from('followups').update({ ...content(f, edits), due_at: new Date().toISOString(), status: 'scheduled', last_error: null }).eq('id', f.id).in('status', OPEN));
+/** Save and move to a new date and time. */
+export const moveFollowUp = async (f, dueAt, edits) =>
+  ok(await supabase.from('followups').update({ ...content(f, edits), due_at: new Date(dueAt).toISOString(), status: 'scheduled', last_error: null }).eq('id', f.id).in('status', OPEN));
+/** Enhance with AI: saves the current text, then n8n 08 improves it (or writes it if empty). Never sends. */
+export const enhanceFollowUp = async (f, edits) =>
+  ok(await supabase.from('followups').update({ ...content(f, edits), ai_draft_requested_at: new Date().toISOString(), status: f.raw === 'failed' ? 'scheduled' : f.raw, last_error: null }).eq('id', f.id).in('status', OPEN));
+export async function getFollowUp(id) {
+  const f = ok(await supabase.from('followups').select('message_body,ai_draft_requested_at,last_error').eq('id', id).single());
+  return { body: plainBody(f.message_body), aiRequested: !!f.ai_draft_requested_at, lastError: f.last_error };
+}
+export const cancelFollowUp = async (id) =>
+  ok(await supabase.from('followups').update({ status: 'cancelled', cancelled_reason: 'staff_cancelled' }).eq('id', id));
+
+/** Numbers for the Follow-ups insights row. */
+export async function followUpInsights() {
   const endToday = new Date(); endToday.setHours(23, 59, 59, 999);
   const month = Date.now() - 30 * 86400000;
-  let fq = supabase.from('followups').select('enquiry_id,status,due_at,sent_at,created_at');
-  let mq = supabase.from('email_messages').select('enquiry_id,message_at,created_at').eq('direction', 'inbound');
-  if (enquiryId) { fq = fq.eq('enquiry_id', enquiryId); mq = mq.eq('enquiry_id', enquiryId); }
-  const [fups, inbound] = await Promise.all([fq.then(ok), mq.then(ok)]);
-  const open = fups.filter((f) => f.status === 'scheduled' || f.status === 'due');
+  const [fups, inbound] = await Promise.all([
+    supabase.from('followups').select('enquiry_id,status,due_at,sent_at,created_at,updated_at').then(ok),
+    supabase.from('email_messages').select('enquiry_id,message_at,created_at').eq('direction', 'inbound').then(ok),
+  ]);
+  const st = fups.map((f) => followUpStatus(f, endToday));
   const sent = fups.filter((f) => f.status === 'sent' && f.sent_at);
   const replied = sent.filter((f) => inbound.some((m) => m.enquiry_id === f.enquiry_id && new Date(m.message_at || m.created_at) > new Date(f.sent_at)));
   const waits = sent.map((f) => (new Date(f.sent_at) - new Date(f.created_at)) / 86400000).filter((d) => d >= 0);
   return {
-    due: open.filter((f) => new Date(f.due_at) <= endToday).length,
-    scheduled: open.filter((f) => new Date(f.due_at) > endToday).length,
+    due: st.filter((s) => s === 'Due today').length,
+    scheduled: st.filter((s) => s === 'Waiting').length,
     sent30: sent.filter((f) => new Date(f.sent_at).getTime() >= month).length,
-    failed: fups.filter((f) => f.status === 'failed').length,
+    failed: st.filter((s) => s === 'Failed').length,
     replied: replied.length,
     replyRate: sent.length ? Math.round((replied.length / sent.length) * 100) : null,
     avgDays: waits.length ? Math.round((waits.reduce((a, b) => a + b, 0) / waits.length) * 10) / 10 : null,
   };
 }
 
-export const cancelFollowUp = async (id) =>
-  ok(await supabase.from('followups').update({ status: 'cancelled', cancelled_reason: 'staff_cancelled' }).eq('id', id));
+/** Pause or resume follow-ups for one enquiry. n8n checks this before every send. */
+export const setFollowUpsPaused = async (enquiryId, paused) =>
+  ok(await supabase.from('enquiries').update({ followup_paused: paused }).eq('id', enquiryId));
+
+/** Active follow-up templates, plus the customer's values for {{variables}}. */
+export async function followUpTemplateData(enquiryId) {
+  const [tpls, e] = await Promise.all([
+    supabase.from('email_templates').select('id,name,category,subject,body').eq('is_active', true)
+      .in('category', ['followup_1', 'followup_2', 'followup_final']).order('name').then(ok),
+    supabase.from('enquiries').select('travel_type,contacts(full_name),travel_details(destination,check_in,check_out)')
+      .eq('id', enquiryId).single().then(ok),
+  ]);
+  const t = Array.isArray(e.travel_details) ? e.travel_details[0] : e.travel_details;
+  return {
+    templates: tpls,
+    vars: {
+      customer_name: e.contacts?.full_name || '',
+      service: e.travel_type && e.travel_type !== 'unknown' ? (TRAVEL_LABEL[e.travel_type] || e.travel_type).toLowerCase() : '',
+      destination: t?.destination || '',
+      dates: t?.check_in || t?.check_out ? `${fmtDate(t.check_in) || '?'} to ${fmtDate(t.check_out) || '?'}` : '',
+    },
+  };
+}
 
 // ---------- quotes ----------
 
