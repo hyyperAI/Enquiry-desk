@@ -1,0 +1,192 @@
+{
+  "name": "Jetwing: 02 Store attachments",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "gmail_message_id"
+            },
+            {
+              "name": "message_row_id"
+            },
+            {
+              "name": "enquiry_id"
+            }
+          ]
+        }
+      },
+      "id": "42a1d507-163d-465c-bac7-fe7bf5ae8650",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "messageId": "={{ $json.gmail_message_id }}",
+        "simple": false,
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "id": "423ea319-1d16-4fa0-9400-846198298036",
+      "name": "Get message with files",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        256,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "webhookId": "e316168d-faa3-4498-9623-2e824cd7f2bb",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8r3EnLHhGZ6HmYZU",
+          "name": "exopai"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Why Code: no native node turns several binary properties on one item into one item per file\nconst ALLOWED = /^(application\\/pdf|image\\/(png|jpe?g|gif|webp|heic)|application\\/msword|application\\/vnd\\.openxmlformats-officedocument\\.wordprocessingml\\.document)$/i;\nconst MAX = 15 * 1024 * 1024;\nconst inp = $('When Executed by Another Workflow').first().json;\nconst out = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  for (const [key, bin] of Object.entries(items[i].binary ?? {})) {\n    if (!ALLOWED.test(bin.mimeType ?? '')) continue;\n    const buf = await this.helpers.getBinaryDataBuffer(i, key);\n    if (buf.length > MAX) continue;\n    const safe = (bin.fileName || key).replace(/[^\\w.\\-]+/g, '_').slice(-120);\n    out.push({\n      json: { enquiry_id: inp.enquiry_id, message_row_id: inp.message_row_id, file_name: bin.fileName || key,\n              mime_type: bin.mimeType, size_bytes: buf.length,\n              storage_path: `${inp.enquiry_id}/${inp.message_row_id}/${out.length}_${safe}` },\n      binary: { data: bin },\n    });\n  }\n}\nreturn out;"
+      },
+      "id": "4e1cab30-4735-482b-b2bc-97deacf945f2",
+      "name": "One item per allowed file",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        496,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://dzygyxxwkgjyirsnhrdr.supabase.co/storage/v1/object/attachments/{{ $json.storage_path }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $json.mime_type }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "70c75e44-8354-4416-8c89-a7057e67361c",
+      "name": "Upload to private bucket",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Why HTTP: the Supabase node has no Storage upload operation.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "bnOGoD90bozQRp9X",
+          "name": "flag"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into attachments (enquiry_id, email_message_id, file_name, mime_type, size_bytes, storage_path)\nvalues ($1::uuid, $2::uuid, $3, $4, $5::bigint, $6) on conflict (storage_path) do nothing;",
+        "options": {
+          "queryReplacement": "={{ [ $('One item per allowed file').item.json.enquiry_id, $('One item per allowed file').item.json.message_row_id, $('One item per allowed file').item.json.file_name, $('One item per allowed file').item.json.mime_type, $('One item per allowed file').item.json.size_bytes, $('One item per allowed file').item.json.storage_path ] }}"
+        }
+      },
+      "id": "67be4479-701c-4a52-805c-41e187343f84",
+      "name": "Save attachment row",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1008,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Get message with files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get message with files": {
+      "main": [
+        [
+          {
+            "node": "One item per allowed file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per allowed file": {
+      "main": [
+        [
+          {
+            "node": "Upload to private bucket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to private bucket": {
+      "main": [
+        [
+          {
+            "node": "Save attachment row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "3MtFPHE7vlpcdf52",
+  "active": false,
+  "tags": []
+}

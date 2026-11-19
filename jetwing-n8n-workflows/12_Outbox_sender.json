@@ -1,0 +1,854 @@
+{
+  "name": "Jetwing: 12 Outbox sender",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "c6d56dac-5347-4ab9-887a-36d8048f1c06",
+      "name": "Every minute",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with requeued as (\n  update outbox set status = 'queued'\n  where status = 'processing' and channel = 'email' and kind in ('reply','quotation')\n    and coalesce(processed_at, created_at) < now() - interval '15 minutes'\n  returning id),\nclaimed as (\n  update outbox o set status = 'processing', processed_at = now(), last_error = null\n  where o.id in (select q.id from outbox q\n                 where q.status = 'queued' and q.channel = 'email' and q.kind in ('reply','quotation')\n                 order by q.created_at limit 10 for update skip locked)\n  returning o.*)\nselect c.id as outbox_id, c.kind, c.enquiry_id, c.quotation_id, c.to_address, c.created_by,\n  coalesce(c.body, '') as body,\n  coalesce(nullif(c.subject, ''), 'Re: ' || coalesce(e.subject, 'Your enquiry')) as subject,\n  (select m.gmail_thread_id from email_messages m where m.enquiry_id = c.enquiry_id and m.status in ('received','sent')\n   order by m.message_at desc nulls last limit 1) as gmail_thread_id,\n  (select m.rfc_message_id from email_messages m where m.enquiry_id = c.enquiry_id and m.direction = 'inbound'\n   order by m.message_at desc nulls last limit 1) as in_reply_to,\n  (select d.id from email_messages d where d.id = c.email_message_id and d.status = 'draft') as draft_row_id,\n  (select d.gmail_draft_id from email_messages d where d.id = c.email_message_id and d.status = 'draft') as gmail_draft_id,\n  (select count(*) from requeued) as requeued_count\nfrom claimed c left join enquiries e on e.id = c.enquiry_id\norder by c.created_at;",
+        "options": {}
+      },
+      "id": "eed773a0-46f0-4bce-947b-a319a72d253c",
+      "name": "Claim outbox rows",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        544
+      ],
+      "notes": "Claims only queued email reply/quotation rows (chat and cancelled rows are never touched). processed_at holds the claim time while processing; rows stuck 15+ min go back to queued (05 and 07 are idempotent).",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "63870928-f8c6-414c-86a7-0c2ca2af645b",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "reply",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "reply"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "fcf0e075-f685-4b2f-ac55-087c598a816d",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "quotation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "quotation"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "adb0e867-6f58-4196-b863-f25586190aef",
+      "name": "Reply or quote?",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        496,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "865ef6f8-c4a6-4ffb-9bd6-059489e00306",
+              "leftValue": "={{ !!$json.to_address && !!$json.gmail_thread_id && !!$json.body.trim() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "fb0087bd-2d46-4247-8ed6-c30822543686",
+      "name": "Reply ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        752,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_app_fail_outbox($1::uuid, $2);",
+        "options": {
+          "queryReplacement": "={{ [ $json.outbox_id, !$json.to_address ? 'No email address to send to.' : (!$json.gmail_thread_id ? 'No email thread found for this enquiry.' : 'The message is empty.') ] }}"
+        }
+      },
+      "id": "d6a7b314-17de-4b88-9424-83ff41f51693",
+      "name": "Fail: reply not ready",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1008,
+        496
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "QAL2OLkUm4aSjdEO",
+          "cachedResultName": "Jetwing: 05 Send email"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false,
+          "value": {
+            "idempotency_key": "={{ 'outbox:' + $json.outbox_id }}",
+            "enquiry_id": "={{ $json.enquiry_id }}",
+            "to": "={{ $json.to_address }}",
+            "subject": "={{ $json.subject }}",
+            "body_html": "={{ $json.body.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\\r?\\n/g, '<br>') }}",
+            "gmail_thread_id": "={{ $json.gmail_thread_id }}",
+            "in_reply_to": "={{ $json.in_reply_to ?? '' }}",
+            "send_type": "manual",
+            "actor": "={{ $json.created_by ?? 'staff' }}",
+            "message_row_id": "={{ $json.draft_row_id ?? '' }}",
+            "attachment_path": ""
+          },
+          "schema": [
+            {
+              "id": "idempotency_key",
+              "displayName": "idempotency_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "to",
+              "displayName": "to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "body_html",
+              "displayName": "body_html",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "gmail_thread_id",
+              "displayName": "gmail_thread_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "in_reply_to",
+              "displayName": "in_reply_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_type",
+              "displayName": "send_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "actor",
+              "displayName": "actor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message_row_id",
+              "displayName": "message_row_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "attachment_path",
+              "displayName": "attachment_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ]
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "872e0f72-5837-4f28-9b90-95b7601a54c0",
+      "name": "Send via 05",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1008,
+        256
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "05 respects test mode and blocks duplicate keys. Key = outbox:<id>."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "47fd6c0c-a957-4039-8a73-aeb48bba3c92",
+              "leftValue": "={{ $json.ok === true || $json.error === 'duplicate' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "1269b2e2-d0df-4ad2-bc5b-a82caaea55d8",
+      "name": "Reply sent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1248,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with o as (\n  update outbox set status = 'sent', processed_at = now(), last_error = null\n  where id = $1::uuid and status = 'processing' returning *),\nm as (\n  update email_messages em set body_text = o.body from o\n  where em.id = nullif($2, '')::uuid returning em.id),\ne as (\n  update enquiries en set status = 'quotation_sent' from o\n  where en.id = o.enquiry_id and en.status = 'new' returning en.id)\nselect (select count(*) from o) as marked_sent, (select count(*) from m) as text_saved,\n  jw_schedule_followup((select enquiry_id from o), 'reply') as followup_id;",
+        "options": {
+          "queryReplacement": "={{ [ $('Claim outbox rows').item.json.outbox_id, $json.email_message_id || $('Claim outbox rows').item.json.draft_row_id || '' ] }}"
+        }
+      },
+      "id": "677fa8c4-6b39-4bc0-9910-e280fd9642ea",
+      "name": "Finish reply",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1504,
+        96
+      ],
+      "notes": "Marks sent, saves the edited text the app shows, New -> Answered, schedules the one follow-up. Does NOT call jw_app_finish_reply_outbox (05 already recorded the send).",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ce6bff87-185b-4af9-ac41-6bb7e9e68916",
+              "leftValue": "={{ !!$('Claim outbox rows').item.json.gmail_draft_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "5202655d-17cc-4ce4-b92b-85363c4e9112",
+      "name": "Gmail draft to delete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1744,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "delete",
+        "messageId": "={{ $('Claim outbox rows').item.json.gmail_draft_id }}"
+      },
+      "id": "85be823b-a73a-45ff-b6fd-cfd04fde646e",
+      "name": "Delete Gmail draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        0
+      ],
+      "webhookId": "b07c9395-1f29-480e-83a9-caf09674bc25",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8r3EnLHhGZ6HmYZU",
+          "name": "exopai"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_app_fail_outbox($1::uuid, $2);",
+        "options": {
+          "queryReplacement": "={{ [ $('Claim outbox rows').item.json.outbox_id, 'Email not sent: ' + ($json.error?.message ?? $json.error ?? 'unknown error') ] }}"
+        }
+      },
+      "id": "a5ded480-8fce-4066-9183-23ce2576066a",
+      "name": "Fail: reply not sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1504,
+        352
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "4e5e2177-10f5-43b4-9ad8-7ff2f994a520",
+              "leftValue": "={{ !!$json.quotation_id && !!$json.to_address }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "c0557949-ca69-4fa7-a81d-5dfed59251b5",
+      "name": "Quote ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        752,
+        752
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_app_fail_outbox($1::uuid, $2);",
+        "options": {
+          "queryReplacement": "={{ [ $json.outbox_id, !$json.quotation_id ? 'No quotation linked to this send.' : 'No email address to send to.' ] }}"
+        }
+      },
+      "id": "ae5b29c3-3b79-4ab1-ac55-2a53963067a3",
+      "name": "Fail: quote not ready",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1008,
+        896
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://team-exop-5453.app.n8n.cloud/webhook/jetwing/send-quotation",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ quotation_id: $json.quotation_id, user_id: $json.created_by, to_email: $json.to_address }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 180000
+        }
+      },
+      "id": "76bd450b-aea7-4566-a053-ef998075c4be",
+      "name": "Send via 07",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1008,
+        704
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Why HTTP: reuses the live webhook workflow as-is. Never-error mode so 409/502/500 answers come back as data.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IkfA6OKH1wwZZtHu",
+          "name": "voyage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "043daa84-b8fd-451b-8b51-d48869a3a8b4",
+              "leftValue": "={{ ($json.statusCode === 200 && $json.body?.ok === true) || $json.body?.error === 'status_sent' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "9a8a94f0-0c29-450c-b3ec-fe9c3bb80fae",
+      "name": "Quote sent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1248,
+        656
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update outbox set status = 'sent', processed_at = now(), last_error = null where id = $1::uuid and status = 'processing';",
+        "options": {
+          "queryReplacement": "={{ [ $('Claim outbox rows').item.json.outbox_id ] }}"
+        }
+      },
+      "id": "c3524b21-994e-43c3-a845-53422960a6ed",
+      "name": "Finish quote",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1504,
+        544
+      ],
+      "notes": "07 already approved, built the PDF, sent it, marked the quote sent and scheduled the follow-up. status_sent = an earlier try already sent it.",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "578ac996-b499-45fe-83e2-3a5431a63983",
+              "name": "reason",
+              "value": "={{ (() => { const e = $json.body?.error ?? $json.error?.message ?? ''; const map = { bad_email: 'The email address is not valid.', no_items: 'The quote has no items.', no_user: 'No staff user on this send.', not_found: 'Quotation not found.', customer_replied_since_opened: 'The customer replied after the quote was opened. Check the new email, then send again.' }; return 'Quote not sent: ' + (map[e] ?? (e ? String(e).replace(/_/g, ' ') : 'HTTP ' + ($json.statusCode ?? 'error'))); })() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6cb45114-017c-46ef-a615-be1749960fae",
+      "name": "Explain quote error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1504,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_app_fail_outbox($1::uuid, $2);",
+        "options": {
+          "queryReplacement": "={{ [ $('Claim outbox rows').item.json.outbox_id, $json.reason ] }}"
+        }
+      },
+      "id": "0b960a24-dd61-4488-92d3-67a7a9b2624b",
+      "name": "Fail: quote not sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1744,
+        800
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every minute": {
+      "main": [
+        [
+          {
+            "node": "Claim outbox rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim outbox rows": {
+      "main": [
+        [
+          {
+            "node": "Reply or quote?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply or quote?": {
+      "main": [
+        [
+          {
+            "node": "Reply ready?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Quote ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply ready?": {
+      "main": [
+        [
+          {
+            "node": "Send via 05",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail: reply not ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via 05": {
+      "main": [
+        [
+          {
+            "node": "Reply sent?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail: reply not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply sent?": {
+      "main": [
+        [
+          {
+            "node": "Finish reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail: reply not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finish reply": {
+      "main": [
+        [
+          {
+            "node": "Gmail draft to delete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail draft to delete?": {
+      "main": [
+        [
+          {
+            "node": "Delete Gmail draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote ready?": {
+      "main": [
+        [
+          {
+            "node": "Send via 07",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fail: quote not ready",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send via 07": {
+      "main": [
+        [
+          {
+            "node": "Quote sent?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain quote error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote sent?": {
+      "main": [
+        [
+          {
+            "node": "Finish quote",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Explain quote error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explain quote error": {
+      "main": [
+        [
+          {
+            "node": "Fail: quote not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "id": "8Vwg2F9SDre7g9hs",
+  "active": false,
+  "tags": []
+}

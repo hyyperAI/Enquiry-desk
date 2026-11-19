@@ -1,0 +1,107 @@
+{
+  "name": "Jetwing: 10 Schedule follow-up",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "enquiry_id"
+            },
+            {
+              "name": "source"
+            }
+          ]
+        }
+      },
+      "id": "504cc201-79c0-41cf-aef9-f09d67a2a79b",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2240,
+        608
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_schedule_followup($1::uuid, $2) as followup_id;",
+        "options": {
+          "queryReplacement": "={{ [ $json.enquiry_id, $json.source ] }}"
+        }
+      },
+      "id": "6d31b50f-1520-4bb4-bd6b-33784eb572df",
+      "name": "Schedule",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2496,
+        608
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1108af33-41da-4c9d-a505-9ba63546ff72",
+              "name": "followup_id",
+              "value": "={{ $json.followup_id ?? '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dfc10bb6-7515-465f-8875-c411ce11f685",
+      "name": "Return",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2736,
+        608
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Schedule",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Return",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "jWaPLXmGBMQGjHtO",
+  "active": false,
+  "tags": []
+}

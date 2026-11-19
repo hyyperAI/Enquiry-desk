@@ -25,7 +25,7 @@ Create a new workflow **"14 API voice call summary"**.
 Activate it, then put the production URL in the app's `.env`:
 
 ```
-VITE_ELEVENLABS_SUMMARY_URL=https://exopai890.app.n8n.cloud/webhook/voice-summary
+VITE_ELEVENLABS_SUMMARY_URL=https://team-exop-5453.app.n8n.cloud/webhook/voice-summary
 ```
 
 The app polls it every 5 s (up to 1 min) after a call ends, until `status` is `done`.
