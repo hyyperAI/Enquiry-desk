@@ -1,0 +1,373 @@
+{
+  "name": "Jetwing: 11 API send follow-up",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jetwing/send-followup",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "588acd6a-292a-4b1b-9934-6f4816306e98",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        96
+      ],
+      "webhookId": "a7ce6c28-03e4-456d-a1c5-ce0227b3a5da",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IkfA6OKH1wwZZtHu",
+          "name": "voyage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with f as (\n  update followups set status = 'processing', message_body = coalesce(nullif($2, ''), message_body)\n  where id = $1::uuid and status = 'due' and message_body is not null returning *)\nselect f.id, f.enquiry_id, f.message_body, c.email as to_email, e.subject,\n  (select m.gmail_thread_id from email_messages m where m.enquiry_id = f.enquiry_id and m.status in ('received','sent')\n   order by m.message_at desc limit 1) as gmail_thread_id,\n  (select m.rfc_message_id from email_messages m where m.enquiry_id = f.enquiry_id and m.direction = 'inbound'\n   order by m.message_at desc limit 1) as in_reply_to\nfrom f join enquiries e on e.id = f.enquiry_id join contacts c on c.id = e.contact_id;",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.followup_id, $json.body.body_html ?? '' ] }}"
+        }
+      },
+      "id": "64efcefa-2198-41aa-a783-94394fa3c8bc",
+      "name": "Claim due follow-up",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        96
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f0852317-b90f-4663-8764-db7fd8294315",
+              "leftValue": "={{ !!$json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "1f31973d-684c-4d8f-9b5f-9e1411018132",
+      "name": "Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'not_due_or_already_sent' }) }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "fb8c369b-8496-412d-aa44-62df48b2fc94",
+      "name": "409 not due",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        752,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "QAL2OLkUm4aSjdEO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/QAL2OLkUm4aSjdEO",
+          "cachedResultName": "Jetwing: 05 Send email"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotency_key": "={{ 'followup:' + $json.id }}",
+            "enquiry_id": "={{ $json.enquiry_id }}",
+            "to": "={{ $json.to_email }}",
+            "subject": "={{ /^re:/i.test($json.subject ?? '') ? $json.subject : 'Re: ' + ($json.subject ?? '') }}",
+            "body_html": "={{ $json.message_body }}",
+            "gmail_thread_id": "={{ $json.gmail_thread_id ?? '' }}",
+            "in_reply_to": "={{ $json.in_reply_to ?? '' }}",
+            "send_type": "followup",
+            "actor": "={{ $('Webhook').item.json.body.user_id }}",
+            "message_row_id": "",
+            "attachment_path": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "idempotency_key",
+              "displayName": "idempotency_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "to",
+              "displayName": "to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "body_html",
+              "displayName": "body_html",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "gmail_thread_id",
+              "displayName": "gmail_thread_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "in_reply_to",
+              "displayName": "in_reply_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_type",
+              "displayName": "send_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "actor",
+              "displayName": "actor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message_row_id",
+              "displayName": "message_row_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "attachment_path",
+              "displayName": "attachment_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "ac606e7f-5861-47c3-9158-55e0632689d6",
+      "name": "Send follow-up",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        752,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_finish_followup($1::uuid, $2::boolean, $3);",
+        "options": {
+          "queryReplacement": "={{ [ $('Claim due follow-up').item.json.id, $json.ok === true || $json.error === 'duplicate', $json.error ?? '' ] }}"
+        }
+      },
+      "id": "ce78592f-dbe1-4c48-88c8-c320be97f0b7",
+      "name": "Finish follow-up",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1008,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: $('Send follow-up').item.json.ok === true, error: $('Send follow-up').item.json.error ?? null }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "fff607ad-07ba-4283-92c3-1246d862a551",
+      "name": "200 done",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1248,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Claim due follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim due follow-up": {
+      "main": [
+        [
+          {
+            "node": "Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Send follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "409 not due",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send follow-up": {
+      "main": [
+        [
+          {
+            "node": "Finish follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finish follow-up": {
+      "main": [
+        [
+          {
+            "node": "200 done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "1qiwD5zFf5Sx9s2l",
+  "active": false,
+  "tags": []
+}

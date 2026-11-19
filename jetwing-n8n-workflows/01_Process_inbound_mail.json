@@ -1,0 +1,562 @@
+{
+  "name": "Jetwing: 01 Process inbound mail",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 1,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "includeSpamTrash": false,
+          "labelIds": [
+            "INBOX"
+          ],
+          "q": "-from:me"
+        },
+        "options": {}
+      },
+      "id": "1eb2ff2c-239d-4f97-9e7f-09b86dd9e642",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -32,
+        128
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8r3EnLHhGZ6HmYZU",
+          "name": "exopai"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from jw_insert_inbound($1::jsonb);",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ gmail_message_id: $json.id, gmail_thread_id: $json.threadId, rfc_message_id: $json.messageId ?? null, sender: $json.from?.value?.[0]?.address ?? '', sender_name: $json.from?.value?.[0]?.name ?? '', recipients: ($json.to?.value ?? []).map(v => v.address), subject: $json.subject ?? '', body_text: $json.text ?? '', body_html: $json.html || null, message_at: $json.date ?? null }) ] }}"
+        }
+      },
+      "id": "4ce465e5-4085-423e-a836-74213801f85b",
+      "name": "Save inbound message",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        208,
+        128
+      ],
+      "notes": "Duplicate protection: unique gmail_message_id, ON CONFLICT DO NOTHING.",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d12b208a-67b6-4ed1-b625-f4f0ec02f11f",
+              "leftValue": "={{ $json.is_new }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "c4fb6436-9900-432f-8fe0-89e56cf38559",
+      "name": "New message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "WsI4njwlsONZqW2M",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/WsI4njwlsONZqW2M",
+          "cachedResultName": "Jetwing: 03 Classify and extract email"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "subject": "={{ $('Gmail Trigger').item.json.subject ?? '' }}",
+            "body_text": "={{ ($('Gmail Trigger').item.json.text ?? '').slice(0, 20000) }}",
+            "sender_email": "={{ $('Gmail Trigger').item.json.from?.value?.[0]?.address ?? '' }}",
+            "sender_name": "={{ $('Gmail Trigger').item.json.from?.value?.[0]?.name ?? '' }}",
+            "is_existing_thread": "={{ !!$('Save inbound message').item.json.existing_enquiry_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "body_text",
+              "displayName": "body_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "sender_email",
+              "displayName": "sender_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "sender_name",
+              "displayName": "sender_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "is_existing_thread",
+              "displayName": "is_existing_thread",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "boolean",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "ef6f9a89-06e3-40e1-b5ac-d1d3f6632877",
+      "name": "Classify and extract",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        704,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c2dd2ed3-d30a-4a37-956f-8ca842c321e7",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "b610d6cf-c7f4-4a37-8c55-9cf233031c35",
+      "name": "Classified OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        960,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_apply_classification($1::uuid, $2::jsonb) as result;",
+        "options": {
+          "queryReplacement": "={{ [ $('Save inbound message').item.json.message_id, JSON.stringify($json.result) ] }}"
+        }
+      },
+      "id": "6982ae4f-3e51-49de-ac7c-f7dc607a86d4",
+      "name": "Apply classification",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1200,
+        16
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Classification failed for message ' + $('Save inbound message').item.json.message_id + ': ' + ($json.error ?? 'unknown') }}"
+      },
+      "id": "135ab4da-5d75-4c0e-a2c3-813f9706b2fd",
+      "name": "Stop: classification failed",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f9fdb468-39ab-45cf-9a5a-4c292d010025",
+              "leftValue": "={{ $json.result.is_enquiry === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "a24061e5-fac9-4e11-9656-2651ba86d605",
+      "name": "Is enquiry?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1456,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "3MtFPHE7vlpcdf52",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/3MtFPHE7vlpcdf52",
+          "cachedResultName": "Jetwing: 02 Store attachments"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "gmail_message_id": "={{ $('Gmail Trigger').item.json.id }}",
+            "message_row_id": "={{ $('Save inbound message').item.json.message_id }}",
+            "enquiry_id": "={{ $('Apply classification').item.json.result.enquiry_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "gmail_message_id",
+              "displayName": "gmail_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message_row_id",
+              "displayName": "message_row_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": false
+        }
+      },
+      "id": "17d14f81-31a7-44c3-adb8-08aef2a83047",
+      "name": "Store attachments",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1696,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "15bff453-a907-40f0-9acf-89b3d74a0784",
+              "leftValue": "={{ $('Apply classification').item.json.result.needs_reply === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "66e8efde-2070-4a2a-95a2-3df886aa5bc1",
+      "name": "Needs reply?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1696,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "Ji343iennWkIzw0J",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/Ji343iennWkIzw0J",
+          "cachedResultName": "Jetwing: 04 Draft reply"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "enquiry_id": "={{ $('Apply classification').item.json.result.enquiry_id }}",
+            "inbound_message_id": "={{ $('Save inbound message').item.json.message_id }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "inbound_message_id",
+              "displayName": "inbound_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "5fdead40-6241-4ab6-bede-29b8ac9b1e96",
+      "name": "Draft reply",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1952,
+        128
+      ]
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Save inbound message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save inbound message": {
+      "main": [
+        [
+          {
+            "node": "New message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New message?": {
+      "main": [
+        [
+          {
+            "node": "Classify and extract",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify and extract": {
+      "main": [
+        [
+          {
+            "node": "Classified OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classified OK?": {
+      "main": [
+        [
+          {
+            "node": "Apply classification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stop: classification failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply classification": {
+      "main": [
+        [
+          {
+            "node": "Is enquiry?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is enquiry?": {
+      "main": [
+        [
+          {
+            "node": "Store attachments",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Needs reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs reply?": {
+      "main": [
+        [
+          {
+            "node": "Draft reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "cHuUDamlwHpUqNf1",
+  "active": false,
+  "tags": []
+}

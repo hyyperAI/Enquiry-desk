@@ -1,0 +1,197 @@
+{
+  "name": "Jetwing: 13 Knowledge indexer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "78c2b8fd-b9b2-497f-a0ca-c7c287d9d5c0",
+      "name": "Every 2 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update knowledge_documents d set error = null\nwhere d.id in (select k.id from knowledge_documents k\n               where k.status = 'processing'\n                 and (k.updated_at <= k.created_at + interval '2 seconds'\n                      or k.updated_at < now() - interval '10 minutes')\n               order by k.created_at limit 5 for update skip locked)\nreturning d.id, d.title;",
+        "options": {}
+      },
+      "id": "5b715380-eacc-4c38-b2fb-633c054749c4",
+      "name": "Claim new uploads",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        0
+      ],
+      "notes": "Picks files never tried (updated_at = created_at) or stuck 10+ min. The update bumps updated_at, so the same file is not taken twice.",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://team-exop-5453.app.n8n.cloud/webhook/jetwing/index-knowledge",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ document_id: $json.id }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 300000
+        }
+      },
+      "id": "1add474f-f94b-4392-8a1c-78dca7886c2d",
+      "name": "Index via 09",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        496,
+        0
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Why HTTP: reuses the live webhook workflow as-is. Never-error mode so 409/502/500 answers come back as data.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IkfA6OKH1wwZZtHu",
+          "name": "voyage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "eaaf29d6-32d1-40d2-9dfa-ab058143c375",
+              "name": "ok",
+              "value": "={{ $json.statusCode === 200 && $json.body?.ok === true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "59018112-2f3c-4d27-b9b2-750bb0c8fe01",
+              "name": "reason",
+              "value": "={{ $json.statusCode === 422 ? 'Only PDF, TXT and MD files can be read.' : ($json.error ? 'Reading the file timed out or failed. Try a smaller file.' : 'Could not read text from this file. Scanned PDFs (pictures of pages) cannot be read. Upload a text PDF, TXT or MD file, under about 100 pages.') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "de6f9319-a792-4fd9-bf48-f3ba86230523",
+      "name": "Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        752,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update knowledge_documents\nset status = case when $2::boolean then status else 'failed' end,\n    error  = case when $2::boolean then error  else left($3, 500) end\nwhere id = $1::uuid and status = 'processing'\nreturning id, status, error;",
+        "options": {
+          "queryReplacement": "={{ [ $('Claim new uploads').item.json.id, $json.ok, $json.reason ] }}"
+        }
+      },
+      "id": "48aa8eec-d187-4caf-b295-8594269dc7ca",
+      "name": "Finish document",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1008,
+        0
+      ],
+      "alwaysOutputData": true,
+      "notes": "On success 09 already set the file live. On any failure the file becomes failed with a readable reason (never stuck on Reading...).",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 2 minutes": {
+      "main": [
+        [
+          {
+            "node": "Claim new uploads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim new uploads": {
+      "main": [
+        [
+          {
+            "node": "Index via 09",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Index via 09": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result": {
+      "main": [
+        [
+          {
+            "node": "Finish document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "id": "qxyMmRMYydIb9gVo",
+  "active": false,
+  "tags": []
+}

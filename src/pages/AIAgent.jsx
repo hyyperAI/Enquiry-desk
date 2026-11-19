@@ -212,6 +212,13 @@ export default function AIAgent() {
                     <Segmented options={['2 days', '3 days']} value={`${s.followup_delay_days} days`}
                       onChange={(v) => saveSwitch({ followup_delay_days: parseInt(v, 10) })} labelledBy="a4" />
                   </Switch>
+                  <Switch id="a5" title="Follow-up send time" hint="Hour of the day follow-ups go out, Sri Lanka time.">
+                    <select aria-labelledby="a5" value={s.followup_send_hour ?? 10}
+                      onChange={(e) => saveSwitch({ followup_send_hour: Number(e.target.value) })}
+                      className="h-10 rounded-card border border-jw-border bg-white px-3 text-sm text-jw-ink">
+                      {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
+                    </select>
+                  </Switch>
                 </div>
               </Card>
       ))}

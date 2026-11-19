@@ -1,0 +1,632 @@
+{
+  "name": "Jetwing: 06 API send reply",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jetwing/send-reply",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "ab85dc9e-f915-4944-8c13-3e9ebe2f56f3",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        256
+      ],
+      "webhookId": "26d81cbf-d9b9-45cf-8383-701d93ccf6ae",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IkfA6OKH1wwZZtHu",
+          "name": "voyage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select d.id, d.status, d.enquiry_id, d.gmail_draft_id, d.subject,\n  coalesce(nullif($2, ''), d.body_html) as body_html, c.email as to_email,\n  (select m.gmail_thread_id from email_messages m where m.enquiry_id = d.enquiry_id and m.status in ('received','sent')\n   order by m.message_at desc limit 1) as gmail_thread_id,\n  (select m.rfc_message_id from email_messages m where m.enquiry_id = d.enquiry_id and m.direction = 'inbound'\n   order by m.message_at desc limit 1) as in_reply_to,\n  exists (select 1 from email_messages m where m.enquiry_id = d.enquiry_id and m.direction = 'inbound'\n          and m.created_at > d.created_at) as newer_inbound\nfrom email_messages d join enquiries e on e.id = d.enquiry_id join contacts c on c.id = e.contact_id\nwhere d.id = $1::uuid and d.direction = 'outbound';",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.draft_id, $json.body.body_html ?? '' ] }}"
+        }
+      },
+      "id": "b3ca38db-15d8-4c69-a3fd-d3357fa79cd6",
+      "name": "Load draft",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        256
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "09012549-e3c0-41b6-801c-e88afb95154b",
+              "leftValue": "={{ $json.status === 'draft' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "2e0792db-b951-4616-bb30-64b62bdb4d20",
+      "name": "Draft still open?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.status ? 'status_' + $json.status : 'not_found' }) }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "9a7d0afa-9759-41c1-95c8-c8ee8e9c36ed",
+      "name": "409 not a draft",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        752,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d06ddd08-683e-4cb5-8efe-c7e0ca9e3569",
+              "leftValue": "={{ $json.newer_inbound === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "830fb93e-9daa-475c-bde9-e4efb8c9beae",
+      "name": "Customer wrote again?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        752,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'customer_replied_since_draft' }) }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "3605a855-450e-4593-853d-16a2a088b553",
+      "name": "409 customer replied",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1008,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "QAL2OLkUm4aSjdEO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/QAL2OLkUm4aSjdEO",
+          "cachedResultName": "Jetwing: 05 Send email"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotency_key": "={{ 'reply:' + $json.id }}",
+            "enquiry_id": "={{ $json.enquiry_id }}",
+            "to": "={{ $json.to_email }}",
+            "subject": "={{ $json.subject }}",
+            "body_html": "={{ $json.body_html }}",
+            "gmail_thread_id": "={{ $json.gmail_thread_id }}",
+            "in_reply_to": "={{ $json.in_reply_to ?? '' }}",
+            "send_type": "manual",
+            "actor": "={{ $('Webhook').item.json.body.user_id }}",
+            "message_row_id": "={{ $json.id }}",
+            "attachment_path": ""
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "idempotency_key",
+              "displayName": "idempotency_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "to",
+              "displayName": "to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "body_html",
+              "displayName": "body_html",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "gmail_thread_id",
+              "displayName": "gmail_thread_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "in_reply_to",
+              "displayName": "in_reply_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_type",
+              "displayName": "send_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "actor",
+              "displayName": "actor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message_row_id",
+              "displayName": "message_row_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "attachment_path",
+              "displayName": "attachment_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "289ab836-b6db-4821-971f-16ad32034ab5",
+      "name": "Send email",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1008,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a7b3f5da-580d-4c70-8f65-4ca603ea8e67",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "916b061c-de0c-47e8-8311-a1a3be2cd919",
+      "name": "Sent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1248,
+        256
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "dad2c08e-8e0a-493d-b914-eff5ebe41e25",
+      "name": "502 send failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1504,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "jWaPLXmGBMQGjHtO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/jWaPLXmGBMQGjHtO",
+          "cachedResultName": "Jetwing: 10 Schedule follow-up"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "enquiry_id": "={{ $('Load draft').item.json.enquiry_id }}",
+            "source": "reply"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "1ecbc814-7b44-4be0-a0fd-f2895aa7ba39",
+      "name": "Schedule follow-up",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        1504,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8aeb5b17-f9a3-42fa-af6a-90eefc5ac1e1",
+              "leftValue": "={{ !!$('Load draft').item.json.gmail_draft_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "97dda928-20c1-4888-b66a-ecc628103773",
+      "name": "Gmail draft exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1744,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "operation": "delete",
+        "messageId": "={{ $('Load draft').item.json.gmail_draft_id }}"
+      },
+      "id": "8ceeae3d-a89d-4478-8840-a55049786e98",
+      "name": "Delete Gmail draft",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2000,
+        48
+      ],
+      "webhookId": "2918c32e-d745-46b8-b898-cd2baca7a7d0",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8r3EnLHhGZ6HmYZU",
+          "name": "exopai"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, gmail_message_id: $('Send email').item.json.gmail_message_id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "c3b8f958-721b-44f1-92a5-6569217481c2",
+      "name": "200 sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2256,
+        144
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Load draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load draft": {
+      "main": [
+        [
+          {
+            "node": "Draft still open?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft still open?": {
+      "main": [
+        [
+          {
+            "node": "Customer wrote again?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "409 not a draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Customer wrote again?": {
+      "main": [
+        [
+          {
+            "node": "409 customer replied",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send email": {
+      "main": [
+        [
+          {
+            "node": "Sent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sent?": {
+      "main": [
+        [
+          {
+            "node": "Schedule follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "502 send failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule follow-up": {
+      "main": [
+        [
+          {
+            "node": "Gmail draft exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail draft exists?": {
+      "main": [
+        [
+          {
+            "node": "Delete Gmail draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "200 sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete Gmail draft": {
+      "main": [
+        [
+          {
+            "node": "200 sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "mosjWR6grgLvbsRO",
+  "active": false,
+  "tags": []
+}

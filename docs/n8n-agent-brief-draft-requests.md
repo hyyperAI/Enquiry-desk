@@ -8,7 +8,7 @@ Workflow 01 calls **04 Draft reply** only when a new email comes in, so 3 of 5 o
 The app now has an **"Ask AI to write a reply"** button on the Enquiry page. It puts a request in a new table. n8n must pick the request up, write the draft with the existing 04, and report back.
 
 ## Environment
-- n8n: `https://exopai890.app.n8n.cloud`
+- n8n: `https://team-exop-5453.app.n8n.cloud`
 - Supabase project `jetwing` (ref `dzygyxxwkgjyirsnhrdr`)
 - Credentials to reuse: Postgres **"exop postgres"** (`QuOmykT0o2xGT5OI`), which connects to the jetwing database despite its name.
 

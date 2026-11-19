@@ -1,0 +1,145 @@
+{
+  "name": "Jetwing: 00 Error handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "1de2a7da-8aef-4d07-9e71-e50b3189aa33",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into activity_logs (action, actor, details) values ('workflow_error', 'n8n', $1::jsonb);\ninsert into notifications (type) values ('workflow_error');\nselect alert_email from agent_settings where id = 1;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ workflow: $json.workflow?.name, execution_id: $json.execution?.id, url: $json.execution?.url, node: $json.execution?.lastNodeExecuted, error: $json.execution?.error?.message }) ] }}"
+        }
+      },
+      "id": "28c68be2-facb-4b74-bbeb-93d8d0306eec",
+      "name": "Log error",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        96
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "fb3dee00-de07-4621-ae52-800216e89f2b",
+              "leftValue": "={{ !!$json.alert_email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "e4064697-b68a-458e-97a6-8f5d2a6ba9e4",
+      "name": "Alert email set?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.alert_email }}",
+        "subject": "=[Jetwing n8n] {{ $('Error Trigger').item.json.workflow.name }} failed",
+        "emailType": "text",
+        "message": "=Workflow: {{ $('Error Trigger').item.json.workflow.name }}\nNode: {{ $('Error Trigger').item.json.execution.lastNodeExecuted }}\nError: {{ $('Error Trigger').item.json.execution.error.message }}\nExecution: {{ $('Error Trigger').item.json.execution.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "63029f63-e9f0-447c-8e83-6d000c99e598",
+      "name": "Email alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        752,
+        0
+      ],
+      "webhookId": "b076c802-62e1-4647-96bf-dba8c130cafe",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8r3EnLHhGZ6HmYZU",
+          "name": "exopai"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log error": {
+      "main": [
+        [
+          {
+            "node": "Alert email set?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert email set?": {
+      "main": [
+        [
+          {
+            "node": "Email alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "hqVO1vmTRIel9W6p",
+  "active": false,
+  "tags": []
+}

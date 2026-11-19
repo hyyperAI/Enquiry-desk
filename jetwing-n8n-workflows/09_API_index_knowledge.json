@@ -1,0 +1,486 @@
+{
+  "name": "Jetwing: 09 API index knowledge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jetwing/index-knowledge",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "fa80e8f7-70f3-43a8-8cfb-5ccbb5e3b46e",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ],
+      "webhookId": "361d955b-7652-4115-966a-0bff5f26366e",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IkfA6OKH1wwZZtHu",
+          "name": "voyage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select id, storage_path, mime_type from knowledge_documents where id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.document_id ] }}"
+        }
+      },
+      "id": "190a5aac-0671-4c0f-bb30-e5acd05e423a",
+      "name": "Load document",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        208
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "da952b05-91ac-4108-852b-7a675aee8b99",
+                    "leftValue": "={{ $json.mime_type === 'application/pdf' ? 'pdf' : (['text/plain', 'text/markdown'].includes($json.mime_type) ? 'text' : 'unsupported') }}",
+                    "rightValue": "pdf",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "pdf"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "732190bb-e024-4852-bb8e-cc10427fb0fa",
+                    "leftValue": "={{ $json.mime_type === 'application/pdf' ? 'pdf' : (['text/plain', 'text/markdown'].includes($json.mime_type) ? 'text' : 'unsupported') }}",
+                    "rightValue": "text",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "text"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "other"
+        }
+      },
+      "id": "9fe397e7-76c2-499c-bf40-6319b477e51a",
+      "name": "File type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        496,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://dzygyxxwkgjyirsnhrdr.supabase.co/storage/v1/object/{{ $json.storage_path }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "c3ccbb88-330d-4ffa-95fb-d2d22c22c178",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Why HTTP: the Supabase node has no Storage download operation.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "bnOGoD90bozQRp9X",
+          "name": "flag"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://dzygyxxwkgjyirsnhrdr.supabase.co/storage/v1/object/{{ $json.storage_path }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "433bd7c2-cbc3-4fef-80e9-944c4fdc88f2",
+      "name": "Download text",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        752,
+        208
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Why HTTP: the Supabase node has no Storage download operation.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "bnOGoD90bozQRp9X",
+          "name": "flag"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "id": "1645c667-5b0f-46da-9643-5a9144528214",
+      "name": "Extract PDF text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1008,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "destinationKey": "text",
+        "options": {}
+      },
+      "id": "610a1fa1-b56d-4a8f-8589-ebf20922cfdd",
+      "name": "Extract plain text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [
+        1008,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Why Code: no native node splits long text into overlapping chunks\nconst text = String($json.text ?? $json.data ?? '').replace(/\\r/g, '').replace(/\\n{3,}/g, '\\n\\n').trim();\nif (!text) throw new Error('No text could be extracted from this file');\nconst SIZE = 1200, OVERLAP = 200, chunks = [];\nlet start = 0;\nwhile (start < text.length) {\n  let end = Math.min(start + SIZE, text.length);\n  if (end < text.length) { const cut = text.lastIndexOf('\\n', end); if (cut > start + SIZE / 2) end = cut; }\n  const piece = text.slice(start, end).trim();\n  if (piece) chunks.push(piece);\n  if (end >= text.length) break;\n  start = end - OVERLAP;\n}\nif (chunks.length > 120) throw new Error(`Document too long (${chunks.length} chunks). Split it into smaller files.`);\nreturn { json: { document_id: $('Webhook').first().json.body.document_id, chunks } };"
+      },
+      "id": "addd0b14-b426-4598-907b-d99a3686e7ac",
+      "name": "Split into chunks",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.voyageai.com/v1/embeddings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'voyage-3', input_type: 'document', input: $json.chunks }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "c54857ef-dab6-4377-b174-dd6b5f0c57c9",
+      "name": "Embed chunks",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1504,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "notes": "Why HTTP: no native Voyage AI node. Claude has no embeddings API, so embeddings come from Voyage (open decision).",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IkfA6OKH1wwZZtHu",
+          "name": "voyage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_replace_chunks($1::uuid, $2::jsonb, $3::jsonb) as chunks;",
+        "options": {
+          "queryReplacement": "={{ [ $('Split into chunks').item.json.document_id, JSON.stringify($('Split into chunks').item.json.chunks), JSON.stringify($json.data.map(d => d.embedding)) ] }}"
+        }
+      },
+      "id": "8d026d81-1267-4749-b54c-19599430790a",
+      "name": "Save chunks + go live",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1744,
+        96
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, chunks: $json.chunks }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "8178c522-94b7-4e2c-aa4b-22bc8fd1acb7",
+      "name": "200 indexed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2000,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update knowledge_documents set status = 'failed', error = 'Only PDF, TXT and MD files can be indexed' where id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [ $('Webhook').item.json.body.document_id ] }}"
+        }
+      },
+      "id": "c2cefc17-3f03-4d4e-a3bb-ba60b64c2568",
+      "name": "Mark unsupported",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        752,
+        400
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unsupported_file_type' }) }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "id": "985d6317-ac13-41bf-845c-cb0a6f95e808",
+      "name": "422 unsupported",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1008,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Load document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load document": {
+      "main": [
+        [
+          {
+            "node": "File type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "File type": {
+      "main": [
+        [
+          {
+            "node": "Download PDF",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Download text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark unsupported",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDF": {
+      "main": [
+        [
+          {
+            "node": "Extract PDF text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract PDF text": {
+      "main": [
+        [
+          {
+            "node": "Split into chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download text": {
+      "main": [
+        [
+          {
+            "node": "Extract plain text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract plain text": {
+      "main": [
+        [
+          {
+            "node": "Split into chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into chunks": {
+      "main": [
+        [
+          {
+            "node": "Embed chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed chunks": {
+      "main": [
+        [
+          {
+            "node": "Save chunks + go live",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save chunks + go live": {
+      "main": [
+        [
+          {
+            "node": "200 indexed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark unsupported": {
+      "main": [
+        [
+          {
+            "node": "422 unsupported",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "8z48N73Mr45FZ9Hi",
+  "active": false,
+  "tags": []
+}

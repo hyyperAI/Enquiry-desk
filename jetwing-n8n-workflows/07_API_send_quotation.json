@@ -1,0 +1,767 @@
+{
+  "name": "Jetwing: 07 API send quotation",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jetwing/send-quotation",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "f1048efa-be9c-428d-9853-4eb3fb5bace9",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ],
+      "webhookId": "46e9fee0-cb1d-40e5-9831-1038fbb6131e",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "IkfA6OKH1wwZZtHu",
+          "name": "voyage"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_approve_quotation($1::uuid, $2::uuid, $3, nullif($4, '')::timestamptz) as r;",
+        "options": {
+          "queryReplacement": "={{ [ $json.body.quotation_id, $json.body.user_id, $json.body.to_email ?? '', $json.body.seen_latest_inbound_at ?? '' ] }}"
+        }
+      },
+      "id": "624cdb63-496c-447a-9abf-79e20c41aa80",
+      "name": "Approve quotation",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        208
+      ],
+      "notes": "Approval is recorded here (approved_by/approved_at) from the authenticated dashboard user. Totals recomputed in SQL.",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "32e58504-6c8f-4818-9b3b-f48fab15416f",
+              "leftValue": "={{ $json.r.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "6793c227-46ad-4536-b917-5ceab78cbf1b",
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.r.error }) }}",
+        "options": {
+          "responseCode": 409
+        }
+      },
+      "id": "687f475a-10da-47dc-b158-114b1996a601",
+      "name": "409 cannot send",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        752,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "html",
+        "options": {
+          "fileName": "index.html"
+        }
+      },
+      "id": "559326c5-bf5f-4ae6-9c2b-0abca1785f59",
+      "name": "HTML to file",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1088,
+        -496
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR_GOTENBERG_HOST/forms/chromium/convert/html",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "files",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "634a8e3a-dfea-4eff-8631-a7143bb8b53a",
+      "name": "Render PDF (Gotenberg)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1328,
+        -496
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Why HTTP: no native HTML-to-PDF node. Gotenberg is a free self-hosted PDF service (open decision)."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://dzygyxxwkgjyirsnhrdr.supabase.co/storage/v1/object/quotations/{{ $('Build quotation HTML').item.json.pdf_path }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-upsert",
+              "value": "true"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "d38020fc-0871-471d-8ab6-c24031bf1fc5",
+      "name": "Save PDF privately",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1504,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Why HTTP: the Supabase node has no Storage upload operation.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "bnOGoD90bozQRp9X",
+          "name": "flag"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update quotations set pdf_path = $2 where id = $1::uuid;",
+        "options": {
+          "queryReplacement": "={{ [ $('Webhook').item.json.body.quotation_id, $('Build quotation HTML').item.json.pdf_path ] }}"
+        }
+      },
+      "id": "41dbfb33-fd99-4923-819c-b17650c5e967",
+      "name": "Store PDF path",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1744,
+        96
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "QAL2OLkUm4aSjdEO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/QAL2OLkUm4aSjdEO",
+          "cachedResultName": "Jetwing: 05 Send email"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "idempotency_key": "={{ 'quote:' + $('Approve quotation').item.json.r.quotation.id + ':v' + $('Approve quotation').item.json.r.quotation.version }}",
+            "enquiry_id": "={{ $('Approve quotation').item.json.r.quotation.enquiry_id }}",
+            "to": "={{ $('Approve quotation').item.json.r.quotation.sent_to }}",
+            "subject": "={{ 'Your Jetwing Travels quotation ' + $('Approve quotation').item.json.r.quotation.quotation_number }}",
+            "body_html": "={{ '<p>Dear ' + ($('Approve quotation').item.json.r.contact?.full_name || 'Customer') + ',</p><p>Thank you for your enquiry. Please find your quotation attached' + ($('Approve quotation').item.json.r.quotation.valid_until ? ', valid until ' + $('Approve quotation').item.json.r.quotation.valid_until : '') + '.</p><p>Please reply to this email with any questions.</p><p>Kind regards,<br>Jetwing Travels Team</p>' }}",
+            "gmail_thread_id": "={{ $('Approve quotation').item.json.r.gmail_thread_id ?? '' }}",
+            "in_reply_to": "={{ $('Approve quotation').item.json.r.in_reply_to ?? '' }}",
+            "send_type": "quotation",
+            "actor": "={{ $('Webhook').item.json.body.user_id }}",
+            "message_row_id": "",
+            "attachment_path": "={{ 'quotations/' + $('Build quotation HTML').item.json.pdf_path }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "idempotency_key",
+              "displayName": "idempotency_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "to",
+              "displayName": "to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "body_html",
+              "displayName": "body_html",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "gmail_thread_id",
+              "displayName": "gmail_thread_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "in_reply_to",
+              "displayName": "in_reply_to",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "send_type",
+              "displayName": "send_type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "actor",
+              "displayName": "actor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "message_row_id",
+              "displayName": "message_row_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "attachment_path",
+              "displayName": "attachment_path",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "1bcb00fa-da37-4fdd-8e96-04c8687b7530",
+      "name": "Send quotation email",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2000,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dfdb244b-215e-4f75-ae60-a0ba66fdc21c",
+              "leftValue": "={{ $json.ok === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "f7e9fb6c-d40c-47f4-aec8-a9682cd4e0cd",
+      "name": "Quote sent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2256,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error, note: 'Quotation stays approved; retry is safe.' }) }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "3e4da3d0-4d15-4abc-a508-8e7165e8ce2e",
+      "name": "502 quote not sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2496,
+        304
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_mark_quotation_sent($1::uuid, $2);",
+        "options": {
+          "queryReplacement": "={{ [ $('Approve quotation').item.json.r.quotation.id, $json.gmail_message_id ] }}"
+        }
+      },
+      "id": "c792439f-4a20-4699-9777-5fa7dedd1ba7",
+      "name": "Mark quotation sent",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        2496,
+        0
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "jWaPLXmGBMQGjHtO",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/jWaPLXmGBMQGjHtO",
+          "cachedResultName": "Jetwing: 10 Schedule follow-up"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "enquiry_id": "={{ $('Approve quotation').item.json.r.quotation.enquiry_id }}",
+            "source": "quotation"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "enquiry_id",
+              "displayName": "enquiry_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            },
+            {
+              "id": "source",
+              "displayName": "source",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "mode": "each",
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "id": "ee7dc1ad-ae4b-415a-98c1-29c6da4f56b9",
+      "name": "Schedule follow-up",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        2752,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, pdf_path: $('Build quotation HTML').item.json.pdf_path }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "cc3d2ebb-5e38-459b-8b86-ec830b39c0be",
+      "name": "200 quote sent",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        3008,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://v2.api2pdf.com/chrome/pdf/html",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ html: $json.html, inline: false, fileName: $json.file_name, options: { printBackground: true, preferCSSPageSize: true } }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Render PDF (Api2Pdf)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        64
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "id": "dba2f45d-cd11-4ad8-8bab-8a12dfb7d340",
+      "notes": "Why HTTP: no native Api2Pdf node. Returns a temporary FileUrl.",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "TCcBDlFJEd6udJXe",
+          "name": "api2pdf"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.FileUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1216,
+        64
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "id": "ca2874e8-7392-4b41-a3cc-15353a98487a",
+      "notes": "Why HTTP: fetches the rendered PDF so it can be stored privately in Supabase."
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// Why Code: renders Jetwing's quotation HTML (layout based on their invoice) for the PDF service\nconst LOGO = 'data:image/png;base64,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';\nconst DEFAULT_BANK = `<b>NAME OF BENEFICIARY:</b> JETWING TRAVELS (PRIVATE) LTD.<br>\n<b>ADDRESS:</b> \"JETWING HOUSE\", 46/26, NAVAM MAWATHA, COLOMBO 02, SRI LANKA.<br>\n<b>ACCOUNT NO:</b> 2420409332<br>\n<b>BENEFICIARY'S BANK:</b> COMMERCIAL BANK OF CEYLON PLC.<br>\n<b>BRANCH:</b> FOREIGN BRANCH<br>\n<b>ADDRESS:</b> 21, BRISTOL STREET, COLOMBO 01, SRI LANKA<br>\n<b>SWIFT CODE:</b> CCEYLKLX<br>\n<b>SORT CODE:</b> 7056003`;\n\nconst r = $json.r;\nconst q = r.quotation, items = r.items ?? [], c = r.contact ?? {}, cust = q.customer_block ?? {};\nconst esc = s => String(s ?? '').replace(/[&<>\"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', \"'\": '&#39;' }[ch]));\nconst nl = s => esc(s).replace(/\\n/g, '<br>');\nconst fmt = n => Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\nconst fmtDate = d => d ? new Date(d + 'T00:00:00Z').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).toUpperCase() : '-';\n\nconst ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];\nconst TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];\nconst w3 = n => { const p = []; if (n >= 100) { p.push(ONES[Math.floor(n / 100)] + ' Hundred'); n %= 100; }\n  if (n >= 20) { p.push(TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + ONES[n % 10] : '')); } else if (n > 0) p.push(ONES[n]); return p.join(' '); };\nconst words = n => { if (n === 0) return 'Zero'; const p = [];\n  for (const [v, name] of [[1e9, 'Billion'], [1e6, 'Million'], [1e3, 'Thousand']]) if (n >= v) { p.push(w3(Math.floor(n / v)) + ' ' + name); n %= v; }\n  if (n > 0) p.push(w3(n)); return p.join(' '); };\n\nconst cur = q.currency === 'USD' ? 'US$' : 'LKR';\nconst total = Number(q.total), whole = Math.floor(total), cents = Math.round((total - whole) * 100);\nconst inWords = `${cur} ${words(whole)}${cents ? ' and Cents ' + words(cents) : ''} Only`;\n\nconst normal = items.filter(i => !i.is_bank_charge), bank = items.filter(i => i.is_bank_charge);\nconst lineRow = it => `<tr><td class=\"sub\">${esc(it.description)}${Number(it.quantity) !== 1 ? ` &times; ${fmt(it.quantity)} @ ${fmt(it.unit_price)}` : ''}</td><td class=\"amt\">${fmt(it.total_price)}</td></tr>`;\nconst taxRow = Number(q.taxes) > 0 ? `<tr><td class=\"sub\">Taxes</td><td class=\"amt\">${fmt(q.taxes)}</td></tr>` : '';\nconst name = cust.name ?? c.full_name ?? '';\nconst block = (t, v) => v ? `<div class=\"blk\"><b>${t}</b><br>${nl(v)}</div>` : '';\n\nconst html = `<!doctype html><html><head><meta charset=\"utf-8\"><style>\n@page { size: A4; margin: 16mm 16mm 14mm; }\nbody { font-family: Calibri, Carlito, Arial, sans-serif; font-size: 11pt; color: #111; margin: 0; }\n.head { text-align: center; } .head img { height: 64px; }\n.addr { font-size: 8pt; text-align: center; margin-top: 6px; line-height: 1.35; }\nh1 { text-align: center; font-size: 12pt; margin: 18px 0 14px; letter-spacing: 1px; }\n.meta { display: flex; justify-content: space-between; font-size: 10pt; }\ntable { width: 100%; border-collapse: collapse; margin-top: 14px; }\ntd { padding: 3px 6px; vertical-align: top; } .amt { width: 30mm; text-align: right; border-left: 1px solid #000; }\n.hd td { border-top: 1px solid #000; border-bottom: 1px solid #000; } .hd .amt { text-align: center; }\n.desc td { font-weight: bold; padding-top: 6px; } .sub { padding-left: 14px; }\n.gap td { height: 22px; } .tot td { border-top: 1px solid #000; }\n.words td { border-top: 1px solid #000; border-bottom: 1px solid #000; font-weight: bold; font-size: 10pt; }\n.blk { font-size: 10pt; margin-top: 10px; } .two { display: flex; gap: 24px; } .two .blk { flex: 1; }\n.bank { font-size: 9pt; margin-top: 16px; line-height: 1.45; }\n.foot { margin-top: 22px; font-size: 9pt; } .note { margin-top: 18px; font-size: 8pt; color: #666; text-align: center; }\n</style></head><body>\n<div class=\"head\"><img src=\"${LOGO}\" alt=\"Jetwing Travels\"></div>\n<div class=\"addr\">\"JETWING HOUSE\" 46/26, Navam Mawatha, Colombo 2, <b>SRI LANKA.</b> Tel:+ 94112345700 Fax: 94112345725/345724<br>\nE-mail: travels@jetwing.lk Website: www.jetwingtravels.com<br>BRANCH: Ethukala, Negombo, Sri Lanka. Tel: 031-79175, 79438/9 Fax: +94-31-79277</div>\n<h1>QUOTATION</h1>\n<div class=\"meta\">\n  <div>${cust.company ? `<b>${esc(cust.company)}</b><br>` : ''}${cust.address ? nl(cust.address) + '<br>' : ''}${esc(cust.email ?? q.sent_to)}${cust.phone ?? c.phone ? '<br>' + esc(cust.phone ?? c.phone) : ''}</div>\n  <div style=\"text-align:right\">Quotation No: ${esc(q.quotation_number)}${q.version > 1 ? ' (v' + q.version + ')' : ''}<br>Date: ${fmtDate((q.approved_at ?? '').slice(0, 10) || null)}<br><b>Valid until: ${fmtDate(q.valid_until)}</b></div>\n</div>\n<table>\n  <tr class=\"hd\"><td>${esc(name.toUpperCase())}</td><td class=\"amt\">Amount &ndash; ${cur}</td></tr>\n  ${cust.trip_description ? `<tr class=\"desc\"><td>${nl(cust.trip_description)}</td><td class=\"amt\"></td></tr>` : ''}\n  ${normal.map(lineRow).join('')}${taxRow}\n  ${bank.length ? `<tr class=\"gap\"><td></td><td class=\"amt\"></td></tr>${bank.map(lineRow).join('')}` : ''}\n  <tr class=\"gap\"><td></td><td class=\"amt\"></td></tr>\n  <tr class=\"tot\"><td>Grand Total</td><td class=\"amt\">${fmt(q.total)}</td></tr>\n  <tr class=\"words\"><td colspan=\"2\">${esc(inWords)}</td></tr>\n</table>\n<div class=\"two\">${block('Inclusions', q.inclusions)}${block('Exclusions', q.exclusions)}</div>\n${block('Terms and conditions', q.terms)}\n<div class=\"bank\">${q.payment_details ? nl(q.payment_details) : DEFAULT_BANK}</div>\n<div class=\"foot\">Prepared by<br><b>${esc(cust.prepared_by ?? 'Jetwing Travels Team')}</b></div>\n<div class=\"note\">This is a quotation, not an invoice. Rates are subject to availability at the time of booking.</div>\n</body></html>`;\n\nconst safe = s => String(s).replace(/[^\\w.\\-]+/g, '_');\nreturn { json: { html, file_name: `${safe(q.quotation_number)}-v${q.version}.pdf`, pdf_path: `${q.enquiry_id}/${safe(q.quotation_number)}-v${q.version}.pdf`, r } };"
+      },
+      "name": "Build quotation HTML",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        64
+      ],
+      "id": "1d9010b8-9712-4770-af57-5332601eb52f"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Approve quotation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approve quotation": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Build quotation HTML",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "409 cannot send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTML to file": {
+      "main": [
+        [
+          {
+            "node": "Render PDF (Gotenberg)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render PDF (Gotenberg)": {
+      "main": [
+        []
+      ]
+    },
+    "Save PDF privately": {
+      "main": [
+        [
+          {
+            "node": "Store PDF path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store PDF path": {
+      "main": [
+        [
+          {
+            "node": "Send quotation email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send quotation email": {
+      "main": [
+        [
+          {
+            "node": "Quote sent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Quote sent?": {
+      "main": [
+        [
+          {
+            "node": "Mark quotation sent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "502 quote not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark quotation sent": {
+      "main": [
+        [
+          {
+            "node": "Schedule follow-up",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule follow-up": {
+      "main": [
+        [
+          {
+            "node": "200 quote sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Render PDF (Api2Pdf)": {
+      "main": [
+        [
+          {
+            "node": "Download PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDF": {
+      "main": [
+        [
+          {
+            "node": "Save PDF privately",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build quotation HTML": {
+      "main": [
+        [
+          {
+            "node": "Render PDF (Api2Pdf)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "id": "NbX8QlrOfBL6XOWq",
+  "active": false,
+  "tags": []
+}

@@ -1,0 +1,497 @@
+{
+  "name": "Jetwing: 05 Send email",
+  "nodes": [
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "idempotency_key"
+            },
+            {
+              "name": "enquiry_id"
+            },
+            {
+              "name": "to"
+            },
+            {
+              "name": "subject"
+            },
+            {
+              "name": "body_html"
+            },
+            {
+              "name": "gmail_thread_id"
+            },
+            {
+              "name": "in_reply_to"
+            },
+            {
+              "name": "send_type"
+            },
+            {
+              "name": "actor"
+            },
+            {
+              "name": "message_row_id"
+            },
+            {
+              "name": "attachment_path"
+            }
+          ]
+        }
+      },
+      "id": "452bfc1b-0c0e-4ab0-b07a-4df8c4c2806b",
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "with ins as (\n  insert into send_log (idempotency_key, enquiry_id, send_type)\n  values ($1, nullif($2, '')::uuid, $3) on conflict do nothing returning 1)\nselect (select count(*) from ins) > 0 as claimed, s.test_mode, s.test_email\nfrom agent_settings s where s.id = 1;",
+        "options": {
+          "queryReplacement": "={{ [ $json.idempotency_key, $json.enquiry_id ?? '', $json.send_type ] }}"
+        }
+      },
+      "id": "502c7bf3-e0ee-49ec-9adb-501125d8c83b",
+      "name": "Claim send key",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        256,
+        208
+      ],
+      "notes": "Idempotency: the same key can never send twice. A failed send releases the key so a retry works.",
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "58c79b48-8056-4968-bc26-13f334a4eba7",
+              "leftValue": "={{ $json.claimed === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "54b326b8-1fed-4170-ae51-844c1428028e",
+      "name": "Claimed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a723181e-a455-4dee-8186-c27de5a6d4d8",
+              "name": "ok",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "2b44fe67-2ebc-4124-b828-470399d367ba",
+              "name": "error",
+              "value": "duplicate",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "00e51f2b-d4fc-44f7-bb61-d9ca3850867d",
+      "name": "Return duplicate",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        752,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3670b7d7-66a0-42a8-aee6-af1262bc531e",
+              "leftValue": "={{ !!$('When Executed by Another Workflow').item.json.attachment_path }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "bdc993c3-8a44-40a9-bc1c-5fcaea4f44e7",
+      "name": "Has attachment?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        752,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://dzygyxxwkgjyirsnhrdr.supabase.co/storage/v1/object/{{ $('When Executed by Another Workflow').item.json.attachment_path }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "f6f50929-cd9c-4c26-835c-a184f215d6c5",
+      "name": "Download attachment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1008,
+        0
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "notes": "Why HTTP: the Supabase node has no Storage download operation.",
+      "credentials": {
+        "supabaseApi": {
+          "id": "bnOGoD90bozQRp9X",
+          "name": "flag"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Why Code: the Gmail node cannot send to a chosen address inside an existing thread with an optional attachment in one operation\nconst out = [];\nconst items = $input.all();\nfor (let i = 0; i < items.length; i++) {\n  const inp = $('When Executed by Another Workflow').itemMatching(i).json;\n  const claim = $('Claim send key').itemMatching(i).json;\n  const test = claim.test_mode === true;\n  const to = test ? claim.test_email : inp.to;\n  if (!to) throw new Error(test ? 'Test mode is on but agent_settings.test_email is empty' : 'No recipient');\n  const subject = test ? `[TEST to ${inp.to}] ${inp.subject ?? ''}` : (inp.subject ?? '');\n  const b64 = s => Buffer.from(s, 'utf8').toString('base64');\n  const wrap = s => s.replace(/.{76}/g, '$&\\r\\n');\n  const headers = [`To: ${to}`, `Subject: =?UTF-8?B?${b64(subject)}?=`, 'MIME-Version: 1.0'];\n  if (!test && inp.in_reply_to) headers.push(`In-Reply-To: ${inp.in_reply_to}`, `References: ${inp.in_reply_to}`);\n  const htmlPart = ['Content-Type: text/html; charset=\"UTF-8\"', 'Content-Transfer-Encoding: base64', '', wrap(b64(inp.body_html ?? ''))].join('\\r\\n');\n  let mime;\n  if (inp.attachment_path) {\n    const bin = items[i].binary?.data;\n    if (!bin) throw new Error('Attachment download returned no file');\n    const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n    const name = inp.attachment_path.split('/').pop();\n    const boundary = 'jw_' + Math.random().toString(36).slice(2);\n    mime = [...headers, `Content-Type: multipart/mixed; boundary=\"${boundary}\"`, '',\n      `--${boundary}`, htmlPart, '',\n      `--${boundary}`, `Content-Type: ${bin.mimeType || 'application/pdf'}; name=\"${name}\"`,\n      `Content-Disposition: attachment; filename=\"${name}\"`, 'Content-Transfer-Encoding: base64', '',\n      wrap(buf.toString('base64')), '', `--${boundary}--`].join('\\r\\n');\n  } else {\n    mime = [...headers, htmlPart].join('\\r\\n');\n  }\n  out.push({ json: { raw: Buffer.from(mime).toString('base64url'),\n                     threadId: test ? null : (inp.gmail_thread_id || null), to, subject, is_test: test } });\n}\nreturn out;"
+      },
+      "id": "d921fed2-25d5-4bee-a457-49c663737db2",
+      "name": "Build MIME message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.threadId ? { raw: $json.raw, threadId: $json.threadId } : { raw: $json.raw }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "eedc43bc-eb1e-4c74-aa3b-6086d9ef6830",
+      "name": "Gmail API: send",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1504,
+        208
+      ],
+      "onError": "continueErrorOutput",
+      "notes": "Why HTTP: raw MIME send keeps thread + custom recipient + attachment in one call. Test mode sends to agent_settings.test_email only.",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "8r3EnLHhGZ6HmYZU",
+          "name": "exopai"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select jw_record_send($1::jsonb) as email_message_id;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify({ idempotency_key: $('When Executed by Another Workflow').item.json.idempotency_key, gmail_message_id: $json.id, gmail_thread_id: $json.threadId, message_row_id: $('When Executed by Another Workflow').item.json.message_row_id ?? '', enquiry_id: $('When Executed by Another Workflow').item.json.enquiry_id ?? '', send_type: $('When Executed by Another Workflow').item.json.send_type, actor: $('When Executed by Another Workflow').item.json.actor, to: $('Build MIME message').item.json.to, subject: $('Build MIME message').item.json.subject, body_html: $('When Executed by Another Workflow').item.json.body_html, is_test: $('Build MIME message').item.json.is_test }) ] }}"
+        }
+      },
+      "id": "85413c7e-18d3-45da-b60a-7fc4bc90f90e",
+      "name": "Record send",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1744,
+        96
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a95d8db9-b363-43b5-b01d-def08fd05f86",
+              "name": "ok",
+              "value": "={{ true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "22a2d701-0788-4696-9b5a-f8e2de5e9d34",
+              "name": "gmail_message_id",
+              "value": "={{ $('Gmail API: send').item.json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "44ab4cf7-bec7-4975-950c-0880cc34b0de",
+              "name": "gmail_thread_id",
+              "value": "={{ $('Gmail API: send').item.json.threadId }}",
+              "type": "string"
+            },
+            {
+              "id": "6bb01259-0e5b-44a3-9d4a-759915d26282",
+              "name": "email_message_id",
+              "value": "={{ $json.email_message_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "97c7e570-863a-49ca-ad1d-6242520ff9a6",
+      "name": "Return sent",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2000,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "delete from send_log where idempotency_key = $1 and sent_at is null;",
+        "options": {
+          "queryReplacement": "={{ [ $('When Executed by Another Workflow').item.json.idempotency_key ] }}"
+        }
+      },
+      "id": "f691dee1-1717-4aca-a9bc-029ccf3f574d",
+      "name": "Release send key",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1744,
+        352
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "QuOmykT0o2xGT5OI",
+          "name": "exop postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c337841e-6f9c-42d6-9be6-3cec654cdf24",
+              "name": "ok",
+              "value": "={{ false }}",
+              "type": "boolean"
+            },
+            {
+              "id": "be2f5474-456f-459e-bd88-d8dc697ac9ba",
+              "name": "error",
+              "value": "={{ $('Gmail API: send').item.json.error?.message ?? 'gmail_send_failed' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ea5f23a5-3a63-4554-9d47-d72d0ba24e77",
+      "name": "Return failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2000,
+        352
+      ]
+    }
+  ],
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Claim send key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim send key": {
+      "main": [
+        [
+          {
+            "node": "Claimed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claimed?": {
+      "main": [
+        [
+          {
+            "node": "Has attachment?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return duplicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has attachment?": {
+      "main": [
+        [
+          {
+            "node": "Download attachment",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build MIME message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download attachment": {
+      "main": [
+        [
+          {
+            "node": "Build MIME message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build MIME message": {
+      "main": [
+        [
+          {
+            "node": "Gmail API: send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail API: send": {
+      "main": [
+        [
+          {
+            "node": "Record send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Release send key",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record send": {
+      "main": [
+        [
+          {
+            "node": "Return sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Release send key": {
+      "main": [
+        [
+          {
+            "node": "Return failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "id": "QAL2OLkUm4aSjdEO",
+  "active": false,
+  "tags": []
+}
