@@ -214,6 +214,40 @@ export async function listEnquiries({ filter = 'All', search = '' } = {}) {
     && (!s || [r.name, r.email, r.subject, r.summary].some((x) => x && x.toLowerCase().includes(s))));
 }
 
+export const ENQUIRY_SOURCES = ['Email', 'Website form', 'WhatsApp', 'Facebook', 'Instagram'];
+const CHANNEL_SOURCE = { whatsapp: 'WhatsApp', facebook: 'Facebook', instagram: 'Instagram', messenger: 'Facebook' };
+
+/**
+ * Where an enquiry came from. The database has no source column, so it is worked out:
+ * a linked chat gives its app; a "Contact Form" subject means the website form; anything else is email.
+ */
+function enquirySource(e) {
+  const chat = (e.conversations || []).find((c) => c.channel && c.channel !== 'email');
+  if (chat) return CHANNEL_SOURCE[chat.channel] || chat.channel;
+  if (/contact\s*(us\s*)?form/i.test(e.subject || '')) return 'Website form';
+  return 'Email';
+}
+
+/**
+ * Rows for the Enquiries table, newest first, with the facts the filters need:
+ * source, needsReply (customer wrote last, or no mail yet) and quoteSent.
+ */
+export async function listEnquiryTable() {
+  const rows = ok(await supabase.from('enquiries')
+    .select(`${ROW_COLS},conversations(channel),quotations(status),email_messages(direction,status,message_at,created_at)`)
+    .order('created_at', { ascending: false }).limit(500));
+  return rows.map((e) => {
+    const mails = (e.email_messages || []).filter((m) => m.status === 'received' || m.status === 'sent')
+      .sort((a, b) => new Date(b.message_at || b.created_at) - new Date(a.message_at || a.created_at));
+    return {
+      ...toRow(e),
+      source: enquirySource(e),
+      needsReply: e.status !== 'closed' && (!mails.length || mails[0].direction === 'inbound'),
+      quoteSent: (e.quotations || []).some((q) => q.status === 'sent'),
+    };
+  });
+}
+
 /**
  * Live updates for enquiries (new mail filed by n8n, status changes by anyone).
  * onStatus gets true once connected. Returns an unsubscribe function.
