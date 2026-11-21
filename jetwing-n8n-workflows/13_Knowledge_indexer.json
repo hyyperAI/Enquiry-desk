@@ -46,7 +46,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://team-exop-5453.app.n8n.cloud/webhook/jetwing/index-knowledge",
+        "url": "https://team-exopai675.app.n8n.cloud/webhook/jetwing/index-knowledge",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,

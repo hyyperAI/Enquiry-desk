@@ -41,7 +41,9 @@ function nextFriday() {
 const spokenDate = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 const defaultsFor = (agent) => Object.fromEntries(agent.fields.map((f) => [f.key, f.blank ? '' : f.def()]));
 
-const SUMMARY_URL = import.meta.env.VITE_ELEVENLABS_SUMMARY_URL;
+// n8n base URL comes from .env (VITE_N8N_URL). Change it there and restart the app.
+const N8N_URL = (import.meta.env.VITE_N8N_URL || '').replace(/\/+$/, '');
+const SUMMARY_URL = import.meta.env.VITE_ELEVENLABS_SUMMARY_URL || (N8N_URL ? `${N8N_URL}/webhook/voice-summary` : '');
 const label = (k) => String(k).replace(/_/g, ' ').replace(/^./, (x) => x.toUpperCase());
 const clock = (d) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
