@@ -2,7 +2,7 @@
 
 > Written for the executing agent (Claude Opus 4.6). Read this whole file before touching code.
 > Project: `E:\usman exop\projects\enquiry-desk\enquiry-desk` (React 18 + Vite + Tailwind + React Router 6, no git repo).
-> Backend: Supabase project **jetwing** (`dzygyxxwkgjyirsnhrdr`), n8n cloud (`team-exop-5453.app.n8n.cloud`, use the `959fef1d…` n8n MCP tools; the `n8n-mcp` server fails DNS).
+> Backend: Supabase project **jetwing** (`dzygyxxwkgjyirsnhrdr`), n8n cloud (`team-exopai675.app.n8n.cloud`, use the `959fef1d…` n8n MCP tools; the `n8n-mcp` server fails DNS).
 > All DB access in the app goes through `src/lib/api.js`. The app never sends mail itself: it writes rows (outbox, followups, draft_requests) and n8n does the sending.
 
 ## Context

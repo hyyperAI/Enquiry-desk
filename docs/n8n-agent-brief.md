@@ -21,7 +21,7 @@ React app ──writes/reads──► Supabase "jetwing" ◄──reads/writes�
 - The hand-off is the `outbox` table. The app inserts a row with status `queued`. n8n claims it, sends it, and sets it to `sent` or `failed`.
 
 **Environment**
-- n8n: `https://team-exop-5453.app.n8n.cloud`
+- n8n: `https://team-exopai675.app.n8n.cloud`
 - Supabase project: `jetwing` (project ref `dzygyxxwkgjyirsnhrdr`)
 - Existing n8n credentials to reuse:
   - Postgres to the jetwing database: **"exop postgres"** (`QuOmykT0o2xGT5OI`). The name is misleading; it is the jetwing database.
