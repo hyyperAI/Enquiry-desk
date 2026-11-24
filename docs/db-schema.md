@@ -57,7 +57,7 @@ Extensions: plpgsql, pg_stat_statements, uuid-ossp, pgcrypto, supabase_vault, ve
 - columns: id uuid NN, kind text NN, channel text NN, enquiry_id uuid, email_message_id uuid, quotation_id uuid, conversation_id uuid, to_address text, subject text, body text, status text NN, last_error text, created_by uuid NN, created_at, processed_at
 - fk: enquiry_id -> enquiries.id; email_message_id -> email_messages.id; quotation_id -> quotations.id; conversation_id -> conversations.id (all set null); created_by -> auth.users.id
 - policies: read_all [SELECT], add_own [INSERT], cancel_own_queued [UPDATE]
-- triggers: t_outbox_notify_n8n -> jw_notify_outbox_sender (AFTER INSERT, POSTs {outbox_id, kind} to n8n /webhook/outbox-sender via pg_net when status queued and kind <> chat)
+- triggers: t_outbox_notify_n8n -> jw_notify_outbox_sender (AFTER INSERT, GETs n8n /webhook/outbox-sender?outbox_id=&kind= via pg_net when status queued and kind <> chat)
 
 ### draft_requests
 - columns: id uuid NN, enquiry_id uuid NN, status text NN, last_error text, created_by uuid NN, created_at, processed_at
@@ -84,7 +84,7 @@ Extensions: plpgsql, pg_stat_statements, uuid-ossp, pgcrypto, supabase_vault, ve
 ### knowledge_documents
 - columns: id uuid NN, title text NN, doc_type text NN, storage_path text NN, mime_type text, status text NN, error text, created_at, updated_at
 - policies: read_all [SELECT], add [INSERT], edit [UPDATE], remove [DELETE]
-- triggers: t_knowledge -> jw_touch; t_knowledge_notify_n8n -> jw_notify_knowledge_indexer (AFTER INSERT, POSTs {document_id} to n8n /webhook/Knowledge-indexer via pg_net)
+- triggers: t_knowledge -> jw_touch; t_knowledge_notify_n8n -> jw_notify_knowledge_indexer (AFTER INSERT, GETs n8n /webhook/Knowledge-indexer?document_id= via pg_net)
 
 ### knowledge_chunks
 - columns: id bigint NN, document_id uuid NN, chunk_index int NN, content text NN, embedding vector(1024) NN
