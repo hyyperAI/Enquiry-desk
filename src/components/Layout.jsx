@@ -74,7 +74,9 @@ function Nav({ onNavigate }) {
 }
 
 function UserCard({ user }) {
-  const name = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Staff';
+  // Demo display: show the Exopai team identity instead of the signed-in account.
+  const name = 'Exopai';
+  const email = 'team.exopai@gmail.com';
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -103,7 +105,7 @@ function UserCard({ user }) {
         <div role="menu" aria-label="Account" className="absolute bottom-full left-0 right-0 z-30 mb-2 border border-jw-border bg-white shadow-[0_8px_24px_rgba(0,0,0,.12)]">
           <div className="border-b border-jw-line px-3 py-2.5">
             <span className="block truncate text-[13.5px] font-semibold capitalize text-jw-ink">{name}</span>
-            <span className="block truncate text-[12px] text-jw-gray">{user?.email}</span>
+            <span className="block truncate text-[12px] text-jw-gray">{email}</span>
           </div>
           <NavLink role="menuitem" to="/settings" onClick={() => setOpen(false)} className={item}>
             <Icon name="sliders" /> Account settings
@@ -132,11 +134,11 @@ function UserCard({ user }) {
       <button type="button" onClick={() => { setOpen((o) => !o); setConfirm(false); }} aria-haspopup="menu" aria-expanded={open}
         className="flex w-full cursor-pointer items-center gap-3 rounded-card border border-jw-line bg-jw-offwhite p-2.5 text-left hover:border-jw-border hover:bg-white">
         <span aria-hidden="true" className="inline-flex h-9 w-9 flex-none items-center justify-center bg-jw-olive-deep font-head text-sm font-semibold text-white">
-          {initials(user?.user_metadata?.full_name || user?.email)}
+          {initials(name)}
         </span>
         <span className="flex min-w-0 flex-1 flex-col leading-tight">
           <span className="truncate text-[13.5px] font-semibold capitalize text-jw-ink">{name}</span>
-          <span className="truncate text-[12px] text-jw-gray" title={user?.email}>Reservations team</span>
+          <span className="truncate text-[12px] text-jw-gray" title={email}>Reservations team</span>
         </span>
         <svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" className={'flex-none text-jw-gray transition-transform ' + (open ? 'rotate-180' : '')}><path d="M6 15l6-6 6 6" /></svg>
       </button>

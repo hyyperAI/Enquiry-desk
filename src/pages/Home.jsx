@@ -181,6 +181,9 @@ export default function Home() {
   return (
     <>
       {header}
+      <p className="mb-4 border-l-4 border-jw-magenta bg-white px-4 py-2.5 text-[14px] text-jw-ink">
+        For demo purposes, send emails to <a className="font-semibold underline" href="mailto:team.exopai@gmail.com">team.exopai@gmail.com</a>
+      </p>
       {error && <ErrorState error={error} onRetry={reload} />}
       <NextBanner label="Start here" text={bannerText}
         action={<Button variant="primary" to={first ? first.next.to || `/enquiries/${first.id}` : '/enquiries'} className="px-5">Open First Enquiry</Button>} />
